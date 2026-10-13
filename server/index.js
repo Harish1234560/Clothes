@@ -85,13 +85,34 @@ app.use((error, _request, response, _next) => {
   response.status(500).json({ error: 'The request could not be completed.' });
 });
 
-try {
-  await initializeDatabase();
-  app.listen(port, '127.0.0.1', () => {
+async function startServer() {
+  try {
+    await initializeDatabase();
+  } catch (error) {
+    console.error('Could not initialize PostgreSQL or start the server:', error.message);
+    await pool.end();
+    process.exitCode = 1;
+    return;
+  }
+
+  const server = app.listen(port, '127.0.0.1', () => {
     console.log(`Store API listening on http://127.0.0.1:${port}`);
   });
-} catch (error) {
-  console.error('Could not initialize PostgreSQL or start the server:', error.message);
-  await pool.end();
-  process.exitCode = 1;
+
+  server.on('error', async (error) => {
+    if (error.code === 'EADDRINUSE') {
+      console.warn(`Port ${port} in use, retrying in 1s...`);
+      await new Promise((r) => setTimeout(r, 1000));
+      server.close();
+      app.listen(port, '127.0.0.1', () => {
+        console.log(`Store API listening on http://127.0.0.1:${port}`);
+      });
+    } else {
+      console.error('Server error:', error.message);
+      await pool.end();
+      process.exitCode = 1;
+    }
+  });
 }
+
+startServer();
